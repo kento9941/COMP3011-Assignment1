@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Speech to Text</title>
+<style>
+  :root {
+    --bg: #FAFAF8;
+    --text: #1C1F26;
+    --text-soft: #5B6270;
+    --line: #DEDCD6;
+    --green: #2A7F73;
+    --red: #D64545;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  main {
+    width: 100%;
+    max-width: 30rem;
+    padding: 3rem 3rem;
+    background: #FFF;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+  }
+
+  p {
+    margin: 0 0 2rem;
+    font-size: 1rem;
+    color: var(--text-soft);
+    line-height: 1.5;
+  }
+
+  .control {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  button#mic-btn {
+    width: 5rem;
+    height: 5rem;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    background: var(--green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+  
+  button#mic-btn:active {
+    transform: scale(0.96);
+  }
+
+  button#mic-btn.recording {
+    background: var(--red);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(214, 69, 69, 0.35); }
+    50% { box-shadow: 0 0 0 10px rgba(214, 69, 69, 0); }
+  }
+
+  button#mic-btn svg {
+    width: 2rem;
+    height: 2rem;
+    fill: #FFF;
+  }
+
+  .status {
+    font-size: 1rem;
+    color: var(--text-soft);
+    min-height: 1.5rem;
+  }
+  
+  .status.recording { color: var(--red); }
+
+  .transcript {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--line);
+    min-height: 4rem;
+    font-size: 1rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  
+  .transcript:empty::before {
+	content: "Your transcription will appear here.";
+	color: var(--text-soft);
+  }
+
+  .transcript.error {
+    color: var(--red);
+  }
+</style>
+</head>
+<body>
+
+<main>
+  <h1>Speech to Text</h1>
+  <p>Tap the microphone, speak, then tap again to stop and transcribe.</p>
+
+  <div class="control">
+    <button id="mic-btn" aria-label="Start recording">
+      <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg>
+    </button>
+    <div id="status" class="status">Ready</div>
+  </div>
+
+  <div id="transcript" class="transcript"></div>
+</main>
+
+<script>
+  const micBtn = document.getElementById("mic-btn");
+  const statusEl = document.getElementById("status");
+  const transcriptEl = document.getElementById("transcript");
+
+  let mediaRecorder;
+  let audioChunks = [];
+  let isRecording = false;
+
+  micBtn.addEventListener("click", async () => {
+    if (!isRecording) {
+      await startRecording();
+    } else {
+      stopRecording();
+    }
+  });
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop());
+        const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+        sendForTranscription(audioBlob);
+      };
+
+      mediaRecorder.start();
+      isRecording = true;
+      micBtn.classList.add("recording");
+      micBtn.setAttribute("aria-label", "Stop recording");
+      statusEl.textContent = "Recording";
+      statusEl.classList.add("recording");
+      transcriptEl.textContent = "";
+      transcriptEl.classList.remove("error");
+    } catch (err) {
+      statusEl.textContent = "Microphone access denied or unavailable.";
+    }
+  }
+
+  function stopRecording() {
+    mediaRecorder.stop();
+    isRecording = false;
+    micBtn.classList.remove("recording");
+    micBtn.setAttribute("aria-label", "Start recording");
+    statusEl.textContent = "Transcribing…";
+    statusEl.classList.remove("recording");
+  }
+
+  async function sendForTranscription(audioBlob) {
+    const formData = new FormData();
+    formData.append("audio", audioBlob, "recording.webm");
+
+    try {
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error("Server returned " + response.status);
+      }
+
+      const data = await response.json();
+      transcriptEl.textContent = data.text || "(No transcription returned)";
+      statusEl.textContent = "Ready";
+    } catch (err) {
+      transcriptEl.textContent = "Transcription failed: " + err.message;
+      transcriptEl.classList.add("error");
+      statusEl.textContent = "Ready";
+    }
+  }
+</script>
+
+</body>
+</html>
