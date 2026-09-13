@@ -22,9 +22,12 @@ public class OpenAiTranscriptionService implements TranscriptionService {
 
     private final RestClient restClient;
     private final String apiKey;
+    private final GlobalStatsTracker statsTracker;
 
-    public OpenAiTranscriptionService(@Value("${OPENAI_API_KEY}") String apiKey) {
+    public OpenAiTranscriptionService(@Value("${OPENAI_API_KEY}") String apiKey,
+                                       GlobalStatsTracker statsTracker) {
         this.apiKey = apiKey;
+        this.statsTracker = statsTracker;
         this.restClient = RestClient.create();
     }
 
@@ -56,6 +59,14 @@ public class OpenAiTranscriptionService implements TranscriptionService {
                 .retrieve()
                 .body(OpenAiTranscriptionResponse.class);
 
-        return response != null ? response.text() : "";
+        if (response == null) {
+            return "";
+        }
+
+        if (response.usage() != null) {
+            statsTracker.recordUsage(response.usage().inputTokens(), response.usage().outputTokens());
+        }
+
+        return response.text();
     }
 }
